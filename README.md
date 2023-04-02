@@ -1,5 +1,5 @@
 # A-Frame_VRHand
-A-FrameのVRで動作するOculusコントローラの操作システム．
+A-FrameのVRで動作するOculusコントローラのテンプレート．
 
 ## TODO
 - UIの構築
