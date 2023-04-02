@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8"/>
+	<script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+	<script src="https://unpkg.com/aframe-environment-component/dist/aframe-environment-component.min.js"></script>
+	<script src="https://unpkg.com/three@0.131.3/examples/js/loaders/TDSLoader.js"></script>
+	<script src="main.js"></script>
+</head>
+<body>
+	<a-scene stats loading-screen="dotsColor: gray; backgroundColor: lightgray">
+
+        <a-assets timeout="30000">
+			<img id="paint_1" src="assets/art1.jpg"></img>
+            <img id="paint_2" src="assets/art2.jpg"></img>
+            <img id="paint_3" src="assets/art3.jpg"></img>
+            <img id="paint_4" src="assets/art4.jpg"></img>
+		</a-assets>
+
+		<!-- Controller -->
+        <a-entity laser-controls="hand: left" raycaster="objects: .collidable; far: 20" vr-controller></a-entity>
+        <a-entity laser-controls="hand: right" raycaster="objects: .collidable; far: 20" vr-controller></a-entity>
+
+
+        <a-sky color="#ECECEC"></a-sky> 
+		<a-entity environment="preset: default;"></a-entity>       
+
+        <!-- Paint #1 -->
+        <a-image id="my_btn01" src="#paint_1" position="-10 5 -15" scale="5 5 5"></a-image>
+
+        <!-- <a-image id="my_info01" src="#img_info" position="-10 1.5 -15" scale="1 1 1"></a-image> -->
+        <a-text id="my_text" value="" position="-10 2 -15" scale="2 2 2" align="center" color="#ffffff"></a-text>
+        <a-box id="my_box" class="collidable" position="-10 1 -15" rotation="0 0 0" color="#D4AC0D" depth=0.5></a-box>
+        <a-text id="my_label" value="INFO" position="-9.8 1 -14.5" scale="2 2 2" align="center" color="#ffffff"></a-box>
+
+	</a-scene>
+</body>
+<script>
+    const box = document.getElementById("my_box");
+box.addEventListener("raycaster-intersected", (e)=>{
+	box.setAttribute('color', "#F1C40F");
+});
+box.addEventListener("raycaster-intersected-cleared", (e)=>{
+	box.setAttribute('color', "#D4AC0D");
+});
+</script>
+</html>

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Oculus Quest Demo</title>
+    <meta name="description" content="Oculus Quest Demo">
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://rawgit.com/fernandojsg/aframe-teleport-controls/master/dist/aframe-teleport-controls.min.js"></script>
+    <script src="//cdn.rawgit.com/donmccurdy/aframe-physics-system/v3.3.0/dist/aframe-physics-system.min.js"></script>
+</head>
+<body>
+    <script>
+        // ベクトル間の距離を求める
+        function distanceVector(v1, v2) {
+            var dx = v1.x - v2.x;
+            var dy = v1.y - v2.y;
+            var dz = v1.z - v2.z;
+
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        //
+        // コントローラー間で共有する変数
+        //
+
+        var rightHandPos = null;
+        var leftHandPos = null;
+        var rightHandGrip = null;
+        var leftHandGrip = null;
+        var rightHandSelected = null;
+        var leftHandSelected = null;
+
+        var initialDst = null;
+        var initialScaleX = null;
+        var initialScaleY = null;
+        var initialScaleZ = null;
+        var readyToScalling = false;
+
+        AFRAME.registerComponent('input-listener', {
+            schema: {
+                hand: { type: "string", default: "" }
+            },
+            init:
+                function () {
+                    //コントローラのグリップボタンを押しているかどうかを保持
+                    this.el.grip = false;
+
+                    // このコントローラーが右手か左手か
+                    if (this.data.hand === "right") {
+                        this.el.hand = "right";
+                        // デバッグ用
+                        this.el.text = document.getElementById("textR");
+                    } else {
+                        this.el.hand = "left";
+                        this.el.text = document.getElementById("textL");
+                    }
+
+                    //
+                    // オブジェクトの回転
+                    //
+
+                    this.el.grabStartQuat = null;
+                    this.el.handStartQuat = null;
+                    this.el.readyToRotate = false;
+
+                    //トリガーを押した時に球を発射 
+                    this.el.addEventListener('triggerdown', function (e) {
+
+                    });
+
+                    //グリップボタンを押した時に呼ばれる
+                    this.el.addEventListener('gripdown', function (e) {
+                        //グリップボタン押下中
+                        this.grip = true;
+
+                        if (this.hand === "right") {
+                            rightHandGrip = true;
+                        } else {
+                            leftHandGrip = true;
+                        }
+                    });
+
+                    //グリップボタンを話した時に呼ばれる
+                    this.el.addEventListener('gripup', function (e) {
+                        //グリップボタン押下終了
+                        this.grip = false;
+
+                        if (this.hand === "right") {
+                            rightHandGrip = false;
+                        } else {
+                            leftHandGrip = false;
+                        }
+                    });
+
+                    //レイキャスターが何かしらのオブジェクトにぶつかった時
+                    this.el.addEventListener('raycaster-intersection', function (e) {
+                        //交差したオブジェクトのうち0番目を覚えておく(本当はもうちょっと上手にやるべき)
+                        this.selectedObj = e.detail.els[0];
+
+                        if (this.hand === "right") {
+                            rightHandSelected = this.selectedObj;
+                        } else {
+                            leftHandSelected = this.selectedObj;
+                        }
+                    });
+
+                    //レイキャスターとオブジェクトとの接触完了
+                    this.el.addEventListener('raycaster-intersection-cleared', function (e) {
+                        //レイキャスターと接触しているオブジェクトの情報をクリア
+                        this.selectedObj = null;
+
+                        if (this.hand === "right") {
+                            rightHandSelected = null;
+                        } else {
+                            leftHandSelected = null;
+                        }
+                    });
+
+                    //Aボタンを押した時(球を全部削除する) 
+                    this.el.addEventListener('abuttondown', function (e) {
+                        //a-sceneに存在する球を全て取得
+                        var els = document.querySelectorAll('.ball');
+                        //球を削除
+                        for (var i = 0; i < els.length; i++) {
+                            els[i].parentNode.removeChild(els[i]);
+                        }
+                    });
+
+                    //xボタンを押した時 
+                    this.el.addEventListener('xbuttondown', function (e) {
+                        //行き先をポインティング  
+                        this.emit('teleportstart');
+                    });
+
+                    //Xボタンを離した時 
+                    this.el.addEventListener('xbuttonup', function (e) {
+                        //ポイントした場所にジャンプ
+                        this.emit('teleportend');
+                    });
+                },
+
+            //毎フレーム呼ばれる
+            tick:
+                function () {
+                    if (this.data.hand === "right") {
+                        // 常に左右のコントローラーの位置をキャッシュする
+                        console.log("right update ");
+
+                        rightHandPos = this.el.object3D.getWorldPosition();
+
+                        // コントローラの回転をデバッグ
+                        const thisRot = this.el.getAttribute("rotation");
+                        const roundedX = Math.floor(thisRot.x * 1000) / 1000;
+                        const roundedY = Math.floor(thisRot.y * 1000) / 1000;
+                        const roundedZ = Math.floor(thisRot.z * 1000) / 1000;
+                        this.el.text.setAttribute(
+                            "value",
+                            roundedX.toString() + ", " + roundedY.toString() + ", " + roundedZ.toString()
+                        );
+                    } else {
+                        console.log("left update");
+
+                        leftHandPos = this.el.object3D.getWorldPosition();
+
+                        // 回転テスト(https://qiita.com/Guvalif/items/ab0c847390adbb8e4a06)
+                        var cube1 = document.getElementById("testCube1");
+                        var target = new THREE.Quaternion();
+                        var axis = new THREE.Vector3(0, 1, 0).normalize();
+                        target.setFromAxisAngle(axis, Math.PI / 100);
+                        //cube1.object3D.quaternion.multiply(target);
+                        cube1.object3D.applyQuaternion(target);
+                    }
+
+                    if (rightHandGrip && leftHandGrip && (rightHandSelected === leftHandSelected)) {
+                        //
+                        // scalling
+                        //
+                        if (this.data.hand === "right") {
+                            // 右手でこの処理はしない
+                            this.el.readyToRotate = false;
+                        } else {
+                            if (!readyToScalling) {
+                                if (rightHandPos !== null && leftHandPos !== null) {
+                                    readyToScalling = true;
+                                    initialDst = distanceVector(rightHandPos, leftHandPos);
+                                    initialScaleX = leftHandSelected.object3D.scale.x;
+                                    initialScaleY = leftHandSelected.object3D.scale.y;
+                                    initialScaleZ = leftHandSelected.object3D.scale.z;
+                                }
+                            } else {
+                                if (rightHandPos !== null && leftHandPos !== null) {
+                                    const currentDst = distanceVector(rightHandPos, leftHandPos);
+                                    const scaleRatio = currentDst / initialDst;
+                                    this.el.selectedObj.setAttribute(
+                                        "scale",
+                                        {
+                                            x: scaleRatio * initialScaleX,
+                                            y: scaleRatio * initialScaleY,
+                                            z: scaleRatio * initialScaleZ
+                                        }
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        readyToScalling = false;
+
+                        if (!this.el.selectedObj || !this.el.grip) {
+                            this.el.readyToRotate = false;
+                            return;
+                        }
+
+                        // レイキャスターの向きを取得 (this.elはコントローラを示す)
+                        const ray = this.el.getAttribute("raycaster").direction;
+                        const currentAxis = new THREE.Vector3(ray.x, ray.y, ray.z).normalize();
+
+                        //
+                        // update position
+                        //
+
+                        // レイキャスターの先端の位置を1.2m手前とし、そのワールド座標を計算 
+                        var p = new THREE.Vector3(currentAxis.x, currentAxis.y, currentAxis.z).multiplyScalar(1.2);
+                        this.el.object3D.localToWorld(p);
+                        // レイキャスターの先端に、選択中のオブジェクトを追従させる
+                        this.el.selectedObj.setAttribute(
+                            "position",
+                            {
+                                x: p.x,
+                                y: p.y,
+                                z: p.z
+                            }
+                        );
+
+                        //
+                        // update rotation
+                        //
+
+                        if (!this.el.readyToRotate) {
+                            // https://aframe.io/docs/1.4.0/introduction/developing-with-threejs.html
+
+                            // つかんでいるオブジェクトの回転を取得
+                            var grabQuaternion = new THREE.Quaternion();
+                            this.el.selectedObj.object3D.getWorldQuaternion(grabQuaternion);
+                            this.el.grabStartQuat = grabQuaternion;
+
+                            // つかんでいる手の回転を取得
+                            var handQuaternion = new THREE.Quaternion();
+                            this.el.object3D.getWorldQuaternion(handQuaternion);
+                            this.el.handStartQuat = handQuaternion;
+
+                            // 次のフレームから回転の追従を開始
+                            this.el.readyToRotate = true;
+                        } else {
+                            // つかんでいる手の現在の回転を取得
+                            var handQuaternion = new THREE.Quaternion();
+                            this.el.object3D.getWorldQuaternion(handQuaternion);
+                            // this.el.object3D.quaternion.clone();
+
+                            // grabを回転させる行列を生成
+                            // (https://forum.unity.com/threads/get-the-difference-between-two-quaternions-and-add-it-to-another-quaternion.513187/)
+                            var offsetQuaternion = new THREE.Quaternion().identity().multiplyQuaternions(
+                                handQuaternion,
+                                this.el.handStartQuat.clone().invert()
+                            );
+
+                            this.el.selectedObj.object3D.quaternion.set(
+                                this.el.grabStartQuat.x,
+                                this.el.grabStartQuat.y,
+                                this.el.grabStartQuat.z,
+                                this.el.grabStartQuat.w,
+                            );
+
+                            this.el.selectedObj.object3D.applyQuaternion(offsetQuaternion);
+                        }
+                    }
+                }
+        });
+    </script>
+    <a-scene physics="debug: false; gravity: 0; restitution: 0.9; " background="color: #AAAAAA">
+        <a-box id ="testCube0" class="collidable" static-body position="-1 0.5 -2" rotation="0 0 0" color="#4CC3D9" shadow> </a-box>
+        <a-box id ="testCube1" class="collidable" static-body position="-1 1.5 -3" rotation="45 0 0" color="#4CC3D9" shadow> </a-box>
+        <a-sphere class="collidable" static-body position="0 1.25 -4" radius="0.7" color="#EF2D5E" shadow></a-sphere>
+        <a-cylinder class="collidable" static-body position="1 0.75 -2" radius="0.5" height="1.5" color="#FFC65D" shadow></a-cylinder>
+        <a-entity id="cameraRig">
+            <a-entity id="head" camera wasd-controls look-controls position="0 1.6 0">
+            </a-entity>
+            <a-entity id="ctlL" teleport-controls="cameraRig: #cameraRig; teleportOrigin: #head; startEvents: teleportstart; endEvents: teleportend" raycaster="objects: .collidable; far:1.2;" laser-controls="hand: left" input-listener="hand: left">
+                <a-text id="textL" value="" position="0 0.05 0" rotation="-90 0 0" scale="0.1 0.1 0.1" align="center" color="#FFFFFF"></a-text>
+            </a-entity>
+            <a-entity id="ctlR" raycaster="objects: .collidable; far:1.2;" laser-controls="hand: right" input-listener="hand: right">
+                <a-text id="textR" value="" position="0 0.05 0" rotation="-90 0 0" scale="0.1 0.1 0.1" align="center" color="#FFFFFF"></a-text>
+            </a-entity>
+        </a-entity>
+    </a-scene>
+</body>
+</html>

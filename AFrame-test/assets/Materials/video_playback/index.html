@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8"/>
+	<script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+	<script src="https://unpkg.com/aframe-environment-component/dist/aframe-environment-component.min.js"></script>
+	<script src="main.js"></script>
+</head>
+<body>
+	<a-scene stats loading-screen="dotsColor: gray; backgroundColor: lightgray">
+
+		<a-assets timeout="30000">
+			<video id="video_namahage" src="assets/video_namahage.mp4"  loop="true"></video> 
+            <!-- webkit-playsinline playsinline -->
+			<img id="img_play" src="assets/img_play.png"></img>
+			<img id="img_pause" src="assets/img_pause.png"></img>
+		</a-assets>
+
+		<!-- Controller -->
+        <a-entity laser-controls="hand: left" raycaster="objects: .collidable; far: 20" vr-controller></a-entity>
+        <a-entity laser-controls="hand: right" raycaster="objects: .collidable; far: 20" vr-controller></a-entity>
+
+
+        <a-sky color="#ECECEC"></a-sky> 
+		<a-entity environment="preset: default;"></a-entity>       
+		
+		<a-plane position="0 0.05 -5" rotation="-90 0 0" width="6" height="6" color="#7BC8A4"></a-plane>
+		
+		<a-video src="#video_namahage" position="0 5 -15" rotation="0 0 0" width="8" height="5"></a-video>
+		
+		<a-box id="play_button" src="#img_pause"  position="0 1 -15" class="collidable" color="#D4AC0D" depth=0.5></a-box>
+	</a-scene>
+
+	<script>
+        const box = document.getElementById("play_button");
+        box.addEventListener("raycaster-intersected", (e)=>{
+            box.setAttribute('color', "#F1C40F");
+        });
+        box.addEventListener("raycaster-intersected-cleared", (e)=>{
+            box.setAttribute('color', "#D4AC0D");
+        });
+    </script>
+</body>
+</html>
