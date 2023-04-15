@@ -20,7 +20,7 @@ node server.js
 ```
    
 3. ウェブからindex.htmlまたはstudent.htmlを取得  
-以下のリンクからアクセス
+以下のリンクからアクセス  
 https://{ipアドレス}  
 https://{ipアドレス}/student.html  
 index.html --> 教授または集会のホストがアクセス  
