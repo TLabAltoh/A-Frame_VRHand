@@ -23,7 +23,7 @@ node server.js
 以下のリンクからアクセス
 https://{ipアドレス}  
 https://{ipアドレス}/student.html  
-
+  
 index.html --> 教授または集会のホストがアクセス
 student.html --> ホスト以外の人(学生など)がアクセス
 
