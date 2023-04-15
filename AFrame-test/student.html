@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Oculus Quest Demo</title>
+    <meta name="description" content="Oculus Quest Demo">
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://rawgit.com/fernandojsg/aframe-teleport-controls/master/dist/aframe-teleport-controls.min.js"></script>
+    <script src="//cdn.rawgit.com/donmccurdy/aframe-physics-system/v3.3.0/dist/aframe-physics-system.min.js"></script>
+</head>
+<body>
+    <script>
+
+        //
+        // WebSocket Client
+        //
+
+        var sock = new WebSocket("wss://192.168.11.10:443");
+
+        //
+        // Hand Settings
+        //
+
+        // ベクトル間の距離を求める
+        function distanceVector(v1, v2) {
+            var dx = v1.x - v2.x;
+            var dy = v1.y - v2.y;
+            var dz = v1.z - v2.z;
+
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        //
+        // コントローラー間で共有する変数
+        //
+
+        var rightHandPos = null;
+        var leftHandPos = null;
+        var rightHandGrip = null;
+        var leftHandGrip = null;
+        var rightHandSelected = null;
+        var leftHandSelected = null;
+
+        var initialDst = null;
+        var initialScaleX = null;
+        var initialScaleY = null;
+        var initialScaleZ = null;
+        var readyToScalling = false;
+
+        AFRAME.registerComponent('input-listener', {
+            schema: {
+                hand: { type: "string", default: "" }
+            },
+            dependencies: ["raycaster"],
+            init:
+                function () {
+
+                    //
+                    // Grab
+                    //
+
+                    //コントローラのグリップボタンを押しているかどうかを保持
+                    this.el.grip = false;
+
+                    // このコントローラーが右手か左手か
+                    if (this.data.hand === "right") {
+                        this.el.hand = "right";
+                        // デバッグ用
+                        this.el.text = document.getElementById("textR");
+                    } else {
+                        this.el.hand = "left";
+                        this.el.text = document.getElementById("textL");
+                    }
+
+                    //
+                    // オブジェクトの回転
+                    //
+
+                    this.el.grabStartQuat = null;
+                    this.el.handStartQuat = null;
+                    this.el.readyToRotate = false;
+                    this.el.readyToRePosition = false;
+                    this.el.distance = 0;
+
+                    //トリガーを押した時に球を発射 
+                    this.el.addEventListener('triggerdown', function (e) {
+
+                        //
+                        // UI Button
+                        //
+
+                        const box_button = document.getElementById("box_button");
+                        const sphere_button = document.getElementById("sphere_button");
+
+                        if(box_button.getAttribute("color") == "#F1C40F"){
+                            var box_obj = document.getElementById("box_obj_entity");
+                            var isShelf = box_obj.getAttribute("isShelf");
+
+                            if(isShelf === "true"){
+                                box_obj.setAttribute("position", "0 1.5 -0.7227");
+                                box_obj.setAttribute("isShelf", "false");
+                            }else{
+                                box_obj.setAttribute("position", "2.26 1.53605 -0.384");
+                                box_obj.setAttribute("scale", "0.2 0.2 0.2");
+                                box_obj.setAttribute("rotation", "0 0 0");
+                                box_obj.setAttribute("isShelf", "true");
+                            }
+                        }
+
+                        if(sphere_button.getAttribute("color") == "#F1C40F"){
+                            var sphere_obj = document.getElementById("sphere_obj_entity");
+                            var isShelf = sphere_obj.getAttribute("isShelf");
+
+                            if(isShelf === "true"){
+                                sphere_obj.setAttribute("position", "0 1.5 -0.7227");
+                                sphere_obj.setAttribute("isShelf", "false");
+                            }else{
+                                sphere_obj.setAttribute("position", "2.26026 2.49179 -0.3843");
+                                sphere_obj.setAttribute("scale", "0.2 0.2 0.2");
+                                sphere_obj.setAttribute("rotation", "0 0 0");
+                                sphere_obj.setAttribute("isShelf", "true");
+                            }
+                        }
+                    });
+
+                    //グリップボタンを押した時に呼ばれる
+                    this.el.addEventListener('gripdown', function (e) {
+                        //グリップボタン押下中
+                        this.grip = true;
+
+                        if (this.hand === "right") {
+                            rightHandGrip = true;
+                        } else {
+                            leftHandGrip = true;
+                        }
+                    });
+
+                    //グリップボタンを話した時に呼ばれる
+                    this.el.addEventListener('gripup', function (e) {
+                        //グリップボタン押下終了
+                        this.grip = false;
+
+                        if (this.hand === "right") {
+                            rightHandGrip = false;
+                        } else {
+                            leftHandGrip = false;
+                        }
+                    });
+
+                    //レイキャスターが何かしらのオブジェクトにぶつかった時
+                    this.el.addEventListener('raycaster-intersection', function (e) {
+                        if(this.readyToRePosition || readyToScalling){
+                            return;
+                        }
+                        //交差したオブジェクトのうち0番目を覚えておく(本当はもうちょっと上手にやるべき)
+                        this.selectedObj = e.detail.els[0];
+
+                        if (this.hand === "right") {
+                            rightHandSelected = this.selectedObj;
+                        } else {
+                            leftHandSelected = this.selectedObj;
+                        }
+                    });
+
+                    //レイキャスターとオブジェクトとの接触完了
+                    this.el.addEventListener('raycaster-intersection-cleared', function (e) {
+                        //レイキャスターと接触しているオブジェクトの情報をクリア
+                        this.selectedObj = null;
+
+                        if (this.hand === "right") {
+                            rightHandSelected = null;
+                        } else {
+                            leftHandSelected = null;
+                        }
+                    });
+
+                    //Aボタンを押した時(球を全部削除する) 
+                    this.el.addEventListener('abuttondown', function (e) {
+                        // //a-sceneに存在する球を全て取得
+                        // var els = document.querySelectorAll('.ball');
+                        // //球を削除
+                        // for (var i = 0; i < els.length; i++) {
+                        //     els[i].parentNode.removeChild(els[i]);
+                        // }
+                    });
+
+                    //xボタンを押した時 
+                    this.el.addEventListener('xbuttondown', function (e) {
+                        //行き先をポインティング  
+                        this.emit('teleportstart');
+                    });
+
+                    //Xボタンを離した時 
+                    this.el.addEventListener('xbuttonup', function (e) {
+                        //ポイントした場所にジャンプ
+                        this.emit('teleportend');
+                    });
+                },
+
+            //毎フレーム呼ばれる
+            tick:
+                function () {
+                    if (this.data.hand === "right") {
+                        // 常に左右のコントローラーの位置をキャッシュする
+                        // console.log("right update ");
+
+                        rightHandPos = this.el.object3D.getWorldPosition();
+
+                        // コントローラの回転をデバッグ
+                        const thisRot = this.el.getAttribute("rotation");
+                        const roundedX = Math.floor(thisRot.x * 1000) / 1000;
+                        const roundedY = Math.floor(thisRot.y * 1000) / 1000;
+                        const roundedZ = Math.floor(thisRot.z * 1000) / 1000;
+                        this.el.text.setAttribute(
+                            "value",
+                            roundedX.toString() + ", " + roundedY.toString() + ", " + roundedZ.toString() + ", " + this.el.distance.toString()
+                        );
+                    } else {
+                        // console.log("left update");
+
+                        leftHandPos = this.el.object3D.getWorldPosition();
+
+                        // 回転テスト(https://qiita.com/Guvalif/items/ab0c847390adbb8e4a06)
+                        var cube1 = document.getElementById("testCube1");
+                        var target = new THREE.Quaternion();
+                        var axis = new THREE.Vector3(0, 1, 0).normalize();
+                        target.setFromAxisAngle(axis, Math.PI / 100);
+                        // Local Axis
+                        //cube1.object3D.quaternion.multiply(target);
+
+                        // World Axis
+                        cube1.object3D.applyQuaternion(target);
+                    }
+
+                    //
+                    // Update Grabbed Object
+                    //
+
+                    var grabUpdated = false;
+
+                    if (rightHandGrip && leftHandGrip && (rightHandSelected === leftHandSelected) && rightHandSelected && leftHandSelected) {
+                        this.el.readyToRotate = false;
+                        this.el.readyToRePosition = false;
+                        //
+                        // scalling
+                        //
+                        if (this.data.hand === "right") {
+                            // 右手でこの処理はしない
+                        } else {
+                            if (!readyToScalling) {
+                                if (rightHandPos !== null && leftHandPos !== null) {
+                                    readyToScalling = true;
+                                    initialDst = distanceVector(rightHandPos, leftHandPos);
+                                    initialScaleX = leftHandSelected.object3D.scale.x;
+                                    initialScaleY = leftHandSelected.object3D.scale.y;
+                                    initialScaleZ = leftHandSelected.object3D.scale.z;
+                                }
+                            } else {
+                                if (rightHandPos !== null && leftHandPos !== null) {
+                                    const currentDst = distanceVector(rightHandPos, leftHandPos);
+                                    const scaleRatio = currentDst / initialDst;
+                                    this.el.selectedObj.setAttribute(
+                                        "scale",
+                                        {
+                                            x: scaleRatio * initialScaleX,
+                                            y: scaleRatio * initialScaleY,
+                                            z: scaleRatio * initialScaleZ
+                                        }
+                                    );
+
+                                    grabUpdated = true;
+                                }
+                            }
+                        }
+                    } else {
+                        readyToScalling = false;
+
+                        if (!this.el.selectedObj || !this.el.grip) {
+                            this.el.readyToRotate = false;
+                            this.el.readyToRePosition = false;
+                            return;
+                        }
+
+                        if(!this.el.readyToRePosition){
+                            var intersection = this.el.components.raycaster.getIntersection(this.el.selectedObj);
+                            if (!intersection) { return; }
+                            var distance = distanceVector(
+                                intersection.point,
+                                this.el.object3D.position
+                            );
+                            this.el.distance = distance + distanceVector(intersection.point, this.el.selectedObj.object3D.position);
+                            this.el.readyToRePosition = true;
+                            return;
+                        }
+
+                        // レイキャスターの向きを取得 (this.elはコントローラを示す)
+                        const ray = this.el.getAttribute("raycaster").direction;
+                        const currentAxis = new THREE.Vector3(ray.x, ray.y, ray.z).normalize();
+
+                        //
+                        // update position
+                        //
+
+                        // レイキャスターの先端の位置を1.2m手前とし、そのワールド座標を計算 
+                        var p = new THREE.Vector3(currentAxis.x, currentAxis.y, currentAxis.z).multiplyScalar(this.el.distance);
+                        this.el.object3D.localToWorld(p);
+                        // レイキャスターの先端に、選択中のオブジェクトを追従させる
+                        this.el.selectedObj.setAttribute(
+                            "position",
+                            {
+                                x: p.x,
+                                y: p.y,
+                                z: p.z
+                            }
+                        );
+
+                        grabUpdated = true;
+
+                        //
+                        // update rotation
+                        //
+
+                        if (!this.el.readyToRotate) {
+                            // https://aframe.io/docs/1.4.0/introduction/developing-with-threejs.html
+
+                            // つかんでいるオブジェクトの回転を取得
+                            var grabQuaternion = new THREE.Quaternion();
+                            this.el.selectedObj.object3D.getWorldQuaternion(grabQuaternion);
+                            this.el.grabStartQuat = grabQuaternion;
+
+                            // つかんでいる手の回転を取得
+                            var handQuaternion = new THREE.Quaternion();
+                            this.el.object3D.getWorldQuaternion(handQuaternion);
+                            this.el.handStartQuat = handQuaternion;
+
+                            // 次のフレームから回転の追従を開始
+                            this.el.readyToRotate = true;
+                        } else {
+                            // つかんでいる手の現在の回転を取得
+                            var handQuaternion = new THREE.Quaternion();
+                            this.el.object3D.getWorldQuaternion(handQuaternion);
+                            // this.el.object3D.quaternion.clone();
+
+                            // grabを回転させる行列を生成
+                            // (https://forum.unity.com/threads/get-the-difference-between-two-quaternions-and-add-it-to-another-quaternion.513187/)
+                            var offsetQuaternion = new THREE.Quaternion().identity().multiplyQuaternions(
+                                handQuaternion,
+                                this.el.handStartQuat.clone().invert()
+                            );
+
+                            this.el.selectedObj.object3D.quaternion.set(
+                                this.el.grabStartQuat.x,
+                                this.el.grabStartQuat.y,
+                                this.el.grabStartQuat.z,
+                                this.el.grabStartQuat.w,
+                            );
+
+                            this.el.selectedObj.object3D.applyQuaternion(offsetQuaternion);
+                        }
+                    }
+
+                    //
+                    // Notification of Object Updates
+                    //
+
+                    if(grabUpdated){
+                        if(this.el.selectedObj.getAttribute("async") === "false"){
+                            return;
+                        }
+                        const id = this.el.selectedObj.getAttribute("id");
+                        const position = this.el.selectedObj.getAttribute("position");
+                        const scale = this.el.selectedObj.getAttribute("scale");
+                        const rotation = this.el.selectedObj.getAttribute("rotation");
+
+                        var obj = {
+                            role: "student",
+                            action: "update obj",
+                            id: id,
+                            position: position,
+                            scale: scale,
+                            rotation: rotation
+                        };
+                        var json = JSON.stringify(obj);
+                        sock.send(json);
+                    }
+                }
+        });
+
+        //
+        // WebSocketClient
+        //
+
+        sock.addEventListener("open", (e) => {
+            console.log("socket connected");
+            var obj = {
+                role: "student",
+                action: "regist"
+            };
+            var json = JSON.stringify(obj);
+            sock.send(json);
+        });
+        sock.addEventListener("close", (e) => {
+            console.log("socket closed");
+        });
+        sock.addEventListener("error", (e) => {
+            console.log("socket error");
+        });
+        sock.addEventListener("message", (e) => {
+            console.log(e.data);
+            var obj = JSON.parse(e.data);
+
+            //
+            // Share, collect
+            //
+
+            if(obj.role === "host"){
+                var sphere_obj = document.getElementById("sphere_obj_entity");
+                var box_obj = document.getElementById("box_obj_entity");
+
+                if(obj.action === "share box"){
+                    sphere_obj.setAttribute("position", "2.26026 2.49179 -0.3843");
+                    sphere_obj.setAttribute("scale", "0.2 0.2 0.2");
+                    sphere_obj.setAttribute("rotation", "0 0 0");
+                    sphere_obj.setAttribute("isShelf", "true");
+
+                    box_obj.setAttribute("position", "0 1.5 -0.7227");
+                    box_obj.setAttribute("isShelf", "false");
+                    return;
+                }else if(obj.action === "share sphere"){
+                    box_obj.setAttribute("position", "2.26 1.53605 -0.384");
+                    box_obj.setAttribute("scale", "0.2 0.2 0.2");
+                    box_obj.setAttribute("rotation", "0 0 0");
+                    box_obj.setAttribute("isShelf", "true");
+
+                    sphere_obj.setAttribute("position", "0 1.5 -0.7227");
+                    sphere_obj.setAttribute("isShelf", "false");
+                    return;
+                }else if(obj.action === "collect"){
+                    box_obj.setAttribute("position", "2.26 1.53605 -0.384");
+                    box_obj.setAttribute("scale", "0.2 0.2 0.2");
+                    box_obj.setAttribute("rotation", "0 0 0");
+                    box_obj.setAttribute("isShelf", "true");
+
+                    sphere_obj.setAttribute("position", "2.26026 2.49179 -0.3843");
+                    sphere_obj.setAttribute("scale", "0.2 0.2 0.2");
+                    sphere_obj.setAttribute("rotation", "0 0 0");
+                    sphere_obj.setAttribute("isShelf", "true");
+                    return;
+                }
+            }else if(obj.role === "server"){
+                if(obj.action === "reject"){
+                    console.log("you are rejected");
+                    sock.close();
+                }
+            }
+
+            //
+            // sync Transform
+            //
+
+            if(obj.action === "update obj"){
+                var target = document.getElementById(obj.id);
+                target.setAttribute("position", obj.position);
+                target.setAttribute("scale", obj.scale);
+                target.setAttribute("rotation", obj.rotation);
+            }
+        });
+    </script>
+    <a-scene physics="debug: false; gravity: 0; restitution: 0.9; " background="color: #AAAAAA">
+        <!-- Grababble Object -->
+        <a-box id ="testCube0" class="collidable" static-body position="-1 0.5 -2" rotation="0 0 0" color="#4CC3D9" shadow> </a-box>
+        <a-box id ="testCube1" class="collidable" static-body position="-1 1.5 -3" rotation="45 0 0" color="#4CC3D9" shadow> </a-box>
+        <a-sphere id="sphere0" class="collidable" static-body position="0 1.25 -4" radius="0.7" color="#EF2D5E" shadow></a-sphere>
+        <a-cylinder id="sphere1" class="collidable" static-body position="1 0.75 -2" radius="0.5" height="1.5" color="#FFC65D" shadow></a-cylinder>
+
+        <!-- UI -->
+        <a-box id="box_button" position="1.81912 1.1529 0.10677" class="collidable" color="#D4AC0D" depth="0.05" height="0.25" width="0.5" material="" geometry="" rotation="0 -45 0">
+            <a-text value="box" position="0 0 0.1" rotation="" scale="0.5 0.5 0.5" align="center" color="#FFFFFF" text=""></a-text>
+        </a-box>
+        <a-box id="sphere_button" position="1.819 2.05518 0.107" class="collidable" color="#D4AC0D" depth="0.05" height="0.25" width="0.5" material="" geometry="" rotation="0 -45 0">
+            <a-text value="sphere" position="0 0 0.1" rotation="" scale="0.5 0.5 0.5" align="center" color="#FFFFFF" text=""></a-text>
+        </a-box>
+
+		<!-- Assets -->
+        <a-assets>
+            <a-asset-item id="box_obj" src="./model/box.obj"></a-asset-item>
+			<a-asset-item id="box_mtl" src="./model/box.mtl"></a-asset-item>
+            <a-asset-item id="sphere_obj" src="./model/sphere.obj"></a-asset-item>
+			<a-asset-item id="sphere_mtl" src="./model/sphere.mtl"></a-asset-item>
+            <a-asset-item id="shelf_obj" src="./model/shelf.obj"></a-asset-item>
+            <a-asset-item id="shelf_mtl" src="./model/shelf.mtl"></a-asset-item>
+        </a-assets>
+
+        <a-obj-model async = "false" id="box_obj_entity" class="collidable" src="#box_obj" mtl="#box_mtl" position="2.26 1.53605 -0.384" rotation="" scale="0.2 0.2 0.2" material="" obj-model="" isshelf="true"></a-obj-model>
+        <a-obj-model async = "false" id="sphere_obj_entity" class="collidable" src="#sphere_obj" mtl="#sphere_mtl" position="2.26026 2.49179 -0.3843" rotation="" scale="0.2 0.2 0.2" material="" obj-model="" isshelf="true"></a-obj-model>
+        <a-obj-model async = "false" id="shelf_obj_entity" src="#shelf_obj" mtl="#shelf_mtl" position="2.84123 0 -0.91218" rotation="0 -45 0" scale="" material="" obj-model=""></a-obj-model>
+
+        <a-entity id="cameraRig">
+            <a-entity id="head" camera wasd-controls look-controls position="0 1.6 0">
+            </a-entity>
+            <a-entity id="ctlL" teleport-controls="cameraRig: #cameraRig; teleportOrigin: #head; startEvents: teleportstart; endEvents: teleportend" raycaster="objects: .collidable; far:3.0;" laser-controls="hand: left" input-listener="hand: left">
+                <a-text id="textL" value="" position="0 0.05 0" rotation="-90 0 0" scale="0.1 0.1 0.1" align="center" color="#FFFFFF"></a-text>
+            </a-entity>
+            <a-entity id="ctlR" raycaster="objects: .collidable; far:3.0;" laser-controls="hand: right" input-listener="hand: right">
+                <a-text id="textR" value="" position="0 0.05 0" rotation="-90 0 0" scale="0.1 0.1 0.1" align="center" color="#FFFFFF"></a-text>
+            </a-entity>
+        </a-entity>
+    </a-scene>
+    <script>
+
+        //
+        // UI settings
+        //
+
+        const box_button = document.getElementById("box_button");
+        box_button.addEventListener("raycaster-intersected", (e)=>{
+            box_button.setAttribute('color', "#F1C40F");
+        });
+        box_button.addEventListener("raycaster-intersected-cleared", (e)=>{
+            box_button.setAttribute('color', "#D4AC0D");
+        });
+
+        const sphere_button = document.getElementById("sphere_button");
+        sphere_button.addEventListener("raycaster-intersected", (e)=>{
+            sphere_button.setAttribute('color', "#F1C40F");
+        });
+        sphere_button.addEventListener("raycaster-intersected-cleared", (e)=>{
+            sphere_button.setAttribute('color', "#D4AC0D");
+        });
+    </script>
+</body>
+</html>
