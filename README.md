@@ -23,9 +23,8 @@ node server.js
 以下のリンクからアクセス
 https://{ipアドレス}  
 https://{ipアドレス}/student.html  
-  
-index.html --> 教授または集会のホストがアクセス
-student.html --> ホスト以外の人(学生など)がアクセス
+index.html --> 教授または集会のホストがアクセス  
+student.html --> ホスト以外の人(学生など)がアクセス  
 
 4. サーバーの終了  
 サーバーを実行中のプロンプトCTRL + Cを実行  
